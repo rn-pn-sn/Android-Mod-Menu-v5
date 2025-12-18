@@ -1,4 +1,3 @@
-
 #include "Jni.hpp"
 #include <list>
 #include <vector>
@@ -12,7 +11,6 @@
 #include <sstream>
 #include <dlfcn.h>
 #include "Includes/obfuscate.h"
-#include "Includes/get_device_api_level_inlines.h"
 #include "Menu/Jni.hpp"
 #include "Includes/Logger.h"
 
@@ -68,6 +66,12 @@ void *exit_thread(void *) {
     exit(0);
 }
 
+int get_api_sdk(JNIEnv* env) {
+    jclass build_version_class = env->FindClass(OBFUSCATE("android/os/Build$VERSION"));
+    jfieldID sdk_int_field = env->GetStaticFieldID(build_version_class, OBFUSCATE("SDK_INT"), OBFUSCATE("I"));
+    return env->GetStaticIntField(build_version_class, sdk_int_field);
+}
+
 void startActivityPermisson(JNIEnv *env, jobject ctx){
     jclass native_context = env->GetObjectClass(ctx);
     jmethodID startActivity = env->GetMethodID(native_context, OBFUSCATE("startActivity"),OBFUSCATE("(Landroid/content/Intent;)V"));
@@ -93,15 +97,14 @@ void startActivityPermisson(JNIEnv *env, jobject ctx){
     env->CallVoidMethod(ctx, startActivity, intent);
 }
 
-
 //Needed jclass parameter because this is a static java method
 void CheckOverlayPermission(JNIEnv *env, jclass thiz, jobject ctx){
     //If overlay permission option is greyed out, make sure to add android.permission.SYSTEM_ALERT_WINDOW in manifest
 
     LOGI(OBFUSCATE("Check overlay permission"));
 
-    int sdkVer = api_level();
-    if (sdkVer >= 23){ //Android 6.0
+    int sdkVer = get_api_sdk(env);
+    if (sdkVer >= 23) { //Android 6.0
         jclass Settings = env->FindClass(OBFUSCATE("android/provider/Settings"));
         jmethodID canDraw =env->GetStaticMethodID(Settings, OBFUSCATE("canDrawOverlays"), OBFUSCATE("(Landroid/content/Context;)Z"));
         if (!env->CallStaticBooleanMethod(Settings, canDraw, ctx)){
@@ -115,9 +118,6 @@ void CheckOverlayPermission(JNIEnv *env, jclass thiz, jobject ctx){
         }
     }
 
-
     LOGI(OBFUSCATE("Start service"));
-
-    //StartMod Normal
     startService(env, ctx);
 }

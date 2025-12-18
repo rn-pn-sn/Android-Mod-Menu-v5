@@ -4,68 +4,101 @@
 
 #include "KittyMemory/MemoryPatch.hpp"
 #include "KittyMemory/KittyInclude.hpp"
+#include "Dobby/dobby.h"
 
-#if defined(__aarch64__) //Compile for arm64 lib only
-#include <And64InlineHook/And64InlineHook.hpp>
-#else //Compile for armv7 lib only.
-#include <Substrate/SubstrateHook.h>
-#include <Substrate/CydiaSubstrate.h>
-#endif
-
-void hook(void *offset, void* ptr, void **orig)
-{
 #if defined(__aarch64__)
-    A64HookFunction(offset, ptr, orig);
+int MP_ASM = 1;
 #else
-    MSHookFunction(offset, ptr, orig);
+int MP_ASM = 0;
 #endif
-}
 
-#define HOOK(lib, offset, ptr, orig) hook((void *)getAbsoluteAddress(lib, offset), (void *)ptr, (void **)&orig)
-#define HOOK_NO_ORIG(lib, offset, ptr) hook((void *)getAbsoluteAddress(lib, offset), (void *)ptr, NULL)
-#define HOOKSYM(lib, sym, ptr, org) hook(dlsym(dlopen(lib, 4), sym), (void *)ptr, (void **)&org)
-#define HOOKSYM_NO_ORIG(lib, sym, ptr) hook(dlsym(dlopen(lib, 4), sym), (void *)ptr, NULL)
+/// classic hook (offset || sym)
+#define HOOK(lib, off_sym, ptr, orig) DobbyHookWrapper(lib, off_sym, (void*)(ptr), (void**)&(orig))
+/// hook (offset || sym) without original
+#define HOOK_NO_ORIG(lib, off_sym, ptr) DobbyHookWrapper(lib, off_sym, (void*)(ptr), nullptr)
 
-// Patching a offset without switch.
-void patchOffset(const char *libName, uint64_t offset, std::string hexBytes)
-{
-    ElfScanner g_il2cppELF = ElfScanner::createWithPath(libName);
-    uintptr_t il2cppBase = g_il2cppELF.base();
-    MemoryPatch patch = MemoryPatch::createWithHex(il2cppBase + offset, hexBytes);
+void DobbyHookWrapper(const char *lib, const char *relative, void* hook_function, void** original_function) {
+    void *abs = getAbsoluteAddress(lib, relative);
 
-    // LOGI(OBFUSCATE("Base: 0x%llx"), il2cppBase);
-    // LOGI(OBFUSCATE("Off: 0x%llx"), offset);
+    // LOGI(OBFUSCATE("Off: 0x%llx, Addr: 0x%llx"), offset, (uintptr_t) abs);
 
-    // LOGI("Current Bytes: %s", patch.get_CurrBytes().c_str());
-
-    if (!patch.isValid())
-    {
-        LOGE(OBFUSCATE("Failing offset: 0x%llx, please re-check the hex you entered."), offset);
-        return;
-    }
-    if (!patch.Modify())
-    {
-        LOGE(OBFUSCATE("Something went wrong while patching this offset: 0x%llx"), offset);
-        return;
+    if (original_function != nullptr) {
+        DobbyHook(abs, (dobby_dummy_func_t)hook_function, (dobby_dummy_func_t*)original_function);
+    } else {
+        DobbyHook(abs, (dobby_dummy_func_t)hook_function, nullptr);
     }
 }
 
-void patchOffsetSym(uintptr_t offset, std::string hexBytes)
-{
-    MemoryPatch patch = MemoryPatch::createWithHex(offset, hexBytes);
-    if (!patch.isValid())
-    {
-        LOGE(OBFUSCATE("Failing offset: 0x%llu, please re-check the hex you entered."), offset);
-        return;
-    }
-    if (!patch.Modify())
-    {
-        LOGE(OBFUSCATE("Something went wrong while patching this offset: 0x%llu"), offset);
-        return;
+/// (offset || sym) you can use instrument for logging, counting function calls, executing side code before the function is executed
+#define INST(lib, off_sym, name) DobbyInstrumentWrapper(lib, off_sym, name)
+
+std::map<void*, const char*> detecting_functions;
+void Detector(void *address, DobbyRegisterContext *ctx) {
+    if(detecting_functions.count(address)) LOGW(OBFUSCATE("()0_0) %s >>>>>>>>>>>>> execute detected"), detecting_functions[address]);
+}
+
+/// an example of a wrapper with a function for detecting execution
+void DobbyInstrumentWrapper(const char *lib, const char *relative, const char *name) {
+    void *abs = getAbsoluteAddress(lib, relative);
+    detecting_functions[abs] = name;
+
+    // not access to the arguments "directly," as in a hook
+    // accessing the arguments requires low-level register reading
+    DobbyInstrument(abs, (dobby_instrument_callback_t)(Detector));
+}
+
+std::map<const char*, MemoryPatch> memoryPatches;
+void patchOffsetWrapper(const char *libName, const char *relative, std::string data, bool change) {
+    auto it = memoryPatches.find(relative);
+
+    if(change) {
+        if(it != memoryPatches.end()) {
+            MemoryPatch& existingPatch = it->second;
+            if(!existingPatch.Modify()) {
+                LOGE(OBFUSCATE("Failed to modify existing patch at: %s"), relative);
+                return;
+            }
+            // LOGI(OBFUSCATE("Existing patch modified at: %s"), relative);
+        } else {
+            MemoryPatch patch;
+            auto address = (uintptr_t) getAbsoluteAddress(libName, relative);
+            // LOGI(OBFUSCATE("Rel: %s, Addr: 0x%llx"), relative, address);
+
+            std::string asm_data = data;
+            if(KittyUtils::String::ValidateHex(data)) {
+                patch = MemoryPatch::createWithHex(address, data);
+            } else {
+                patch = MemoryPatch::createWithAsm(address, MP_ASM_ARCH(MP_ASM), asm_data, 0);
+            }
+
+            if(!patch.isValid()) {
+                LOGE(OBFUSCATE("Failed to create patch at: 0x%llx"), address);
+                return;
+            }
+            if(!patch.Modify()) {
+                LOGE(OBFUSCATE("Failed to apply patch at: 0x%llx"), address);
+                return;
+            }
+            memoryPatches[relative] = patch;
+            // LOGI(OBFUSCATE("New patch applied at: %s"), relative);
+        }
+    } else {
+        if(it != memoryPatches.end()) {
+            if(!it->second.Restore()) {
+                LOGE(OBFUSCATE("Failed to restore patch at: %s"), relative);
+                return;
+            }
+            // LOGI(OBFUSCATE("Patch restored at: %s"), relative);
+        }
     }
 }
 
-#define PATCH(lib, offset, hex) patchOffset(lib, offset, hex)
-#define PATCH_SYM(lib, sym, hex) patchOffset(dlsym(dlopen(lib, 4), sym)), hex), true)
+/// classic patch (offset || sym) (hex || asm)
+#define PATCH(lib, off_sym, hex_asm) patchOffsetWrapper(lib, off_sym, hex_asm, true)
+/// patch original restore (offset || sym) (hex || asm)
+#define RESTORE(lib, off_sym) patchOffsetWrapper(lib, off_sym, "", false)
+
+/// patch switch (offset || sym) (hex || asm)
+#define PATCH_SWITCH(lib, off_sym, hex_asm, boolean) patchOffsetWrapper(lib, off_sym, hex_asm, boolean)
 
 #endif //ANDROID_MOD_MENU_MACROS_H

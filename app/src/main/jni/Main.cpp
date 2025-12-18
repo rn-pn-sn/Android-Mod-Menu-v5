@@ -16,20 +16,9 @@
 #include "Menu/Menu.hpp"
 #include "Menu/Jni.hpp"
 #include "Includes/Macros.h"
+#include "dobby.h"
 
-// Dobby is a very powerful hook framework that including hook, stub, patch, and symbol resolve.
-// It can completely replace And64InlineHook and KittyMemory, so they are deprecated.
-#include "dobby.h" // https://github.com/jmpews/Dobby
-
-bool noDeath;
 int scoreMul = 1, coinsMul = 1;
-
-struct MemPatches {
-    // let's assume we have patches for these functions for whatever game
-    // boolean get_canShoot() function
-    MemoryPatch noDeath;
-    // etc...
-} gPatches;
 
 // Do not change or translate the first text unless you know what you are doing
 // Assigning feature numbers is optional. Without it, it will automatically count for you, starting from 0
@@ -102,17 +91,56 @@ jobjectArray GetFeatureList(JNIEnv *env, jobject context) {
 
 bool btnPressed = false;
 
+//Target main lib here
+#define targetLibName OBFUSCATE("libil2cpp.so")
+
 void Changes(JNIEnv *env, jclass clazz, jobject obj, jint featNum, jstring featName, jint value, jlong Lvalue, jboolean boolean, jstring text) {
 
     switch (featNum) {
         case 0:
-        {
-            if (boolean)
-                gPatches.noDeath.Modify();
-            else
-                gPatches.noDeath.Restore();
+            // offset, hex
+            PATCH_SWITCH(targetLibName, "0x1079728", "C0 03 5F D6", boolean);
+            // The patch switch has been returned and reworked... so it should work stably
+            // if you encounter any problems:
+            // - uncommiting logging for detailed checking of your functions;
+            // - special attention to the preferences -> this is the only source of this problem in the past that I have noticed:
+            // -- try rename the preferences file;
+            // -- for a stable and more flexible save settings, recommend using own system with XML/JSON files.
+
+            // alt possibles usage variants:
+            // symbol, hex
+            PATCH_SWITCH(targetLibName, "_example__sym", "C0 03 5F D6", boolean);
+            // offset, asm
+            PATCH_SWITCH(targetLibName, "0x1079728", "ret", boolean);
+            // symbol, asm
+            PATCH_SWITCH(targetLibName, OBFUSCATE("_example__sym"), OBFUSCATE("ret"), boolean);
+
+            // asm allows you to avoid using hex code, as it is generated automatically from the instructions.
+            // - this is the awesome option if you know what you're doing
+            // - this is probably especially useful with creating dynamic deep patches
+
+            // recommended insert ';' to separate statements, example: "mov x0, #1; ret"
+            // recommended to test your instructions on https://armconverter.com or
+            // https://shell-storm.org/online/Online-Assembler-and-Disassembler/
             break;
-        }
+        case 4:
+            if(boolean) {
+                // offset, hex
+                PATCH(targetLibName, OBFUSCATE("0x10709AC"), OBFUSCATE("E05F40B2 C0035FD6"));
+
+                // alt possibles usage variants:
+                // symbol, hex
+                PATCH(targetLibName, OBFUSCATE("_example__sym"), OBFUSCATE("E0 5F 40 B2 C0 03 5F D6"));
+                // offset, asm
+                PATCH(targetLibName, OBFUSCATE("0x10709AC"), OBFUSCATE("mov x0, #0xffffff; ret"));
+                // symbol, asm
+                PATCH(targetLibName, OBFUSCATE("_example__sym"), OBFUSCATE("mov x0, #0xffffff; ret"));
+            } else {
+                RESTORE(targetLibName, OBFUSCATE("0x10709AC"));
+                // or
+                RESTORE(targetLibName, OBFUSCATE("_example__sym"));
+            }
+            break;
         case 1:
             btnPressed = true;
             break;
@@ -122,6 +150,8 @@ void Changes(JNIEnv *env, jclass clazz, jobject obj, jint featNum, jstring featN
         case 3:
             coinsMul = value;
             break;
+        default:
+            break;
     }
 }
 
@@ -129,7 +159,6 @@ void Changes(JNIEnv *env, jclass clazz, jobject obj, jint featNum, jstring featN
 void (*StartInvcibility)(void *instance, float duration);
 
 void (*old_Update)(void *instance);
-
 void Update(void *instance) {
     if (instance != nullptr) {
         if (btnPressed) {
@@ -140,11 +169,20 @@ void Update(void *instance) {
     return old_Update(instance);
 }
 
-// This pattern of orig_xxx and hook_xxx can be completely replaced by macro `install_hook_name` from dobby.h.
-// You can modify it if you want.
-void (*old_AddScore)(void *instance, int score);
-void AddScore(void *instance, int score) {
+/*
+ void (*old_AddScore)(void *instance, int score);
+ void AddScore(void *instance, int score) {
+    //default any actions
     return old_AddScore(instance, score * scoreMul);
+ }
+*/
+// === This function was completely replaced with super-macro `install_hook_name` from dobby.h ===
+// (base name, return type, ... args)
+install_hook_name(AddScore, void *, void *instance, int score) {
+    // default any actions
+
+    // use orig_ for call original function
+    return orig_AddScore(instance, score + scoreMul);
 }
 
 void (*old_AddCoins)(void *instance, int count);
@@ -152,59 +190,44 @@ void AddCoins(void *instance, int count) {
     return old_AddCoins(instance, count * coinsMul);
 }
 
-//Target lib here
-#define targetLibName OBFUSCATE("libil2cpp.so")
-
-ElfScanner g_il2cppELF;
 
 // we will run our hacks in a new thread so our while loop doesn't block process main thread
 void hack_thread() {
-    LOGI(OBFUSCATE("pthread created"));
-
     // This loop should be always enabled in unity game
     // because libil2cpp.so is not loaded into memory immediately.
     while (!isLibraryLoaded(targetLibName)) {
         sleep(1); // Wait for target lib be loaded.
     }
 
-    // ElfScanner::createWithPath can actually be replaced by xdl_open() and xdl_info(),
-    // but that's from https://github.com/hexhacking/xDL.
-    // You can compile it if you want.
-    do {
-        sleep(1);
-        // getElfBaseMap can also find lib base even if it was loaded from zipped base.apk
-        g_il2cppELF = ElfScanner::createWithPath(targetLibName);
-    } while (!g_il2cppELF.isValid());
-
-    LOGI(OBFUSCATE("%s has been loaded"), (const char *) targetLibName);
-
     // In Android Studio, to switch between arm64-v8a and armeabi-v7a syntax highlighting,
     // You can modify the "Active ABI" in "Build Variants" to switch to another architecture for parsing.
 #if defined(__aarch64__)
-    uintptr_t il2cppBase = g_il2cppELF.base();
-
     //Il2Cpp: Use RVA offset
-    StartInvcibility = (void (*)(void *, float)) getAbsoluteAddress(targetLibName, str2Offset(
-            OBFUSCATE("0x107A3BC")));
+    StartInvcibility = (void (*)(void *, float)) getAbsoluteAddress(targetLibName, OBFUSCATE("0x107A3BC"));
+    // StartInvcibility = (void (*)(void *, float)) getAbsoluteAddress(targetLibName, "_characterPlayer_Update"));
 
-    HOOK(targetLibName, str2Offset(OBFUSCATE("0x107A2E0")), AddScore, old_AddScore);
-    HOOK(targetLibName, str2Offset(OBFUSCATE("0x107A2FC")), AddCoins, old_AddCoins);
-    HOOK(targetLibName, str2Offset(OBFUSCATE("0x1078C44")), Update, old_Update);
+    HOOK(targetLibName, OBFUSCATE("0x107A2FC"), AddCoins, old_AddCoins);
 
-    // This function can completely replace MemoryPatch::createWithHex:
-    // int DobbyCodePatch(void *address, uint8_t *buffer, uint32_t buffer_size); (from dobby.h)
-    // And it is more powerful and intuitive.
-    gPatches.noDeath = MemoryPatch::createWithHex(il2cppBase + str2Offset(OBFUSCATE("0x1079728")), "C0 03 5F D6");
+    // HOOK(targetLibName, OBFUSCATE("0x107A2E0"), AddScore, old_AddScore);
+    // === This function was completely replaced with super-macro `install_hook_name` from dobby.h ===
+    // don't forget set address for hook super-macro:
+    install_hook_AddScore(getAbsoluteAddress(targetLibName,OBFUSCATE("0x107A2E0")));
 
-    //HOOK(targetLibName, str2Offset(OBFUSCATE("0x1079728")), Kill, old_Kill);
+    HOOK(targetLibName, OBFUSCATE("0x1078C44"), Update, old_Update);
+    //HOOK(targetLibName, OBFUSCATE("0x1079728"), Kill, old_Kill);
+    //HOOK(targetLibName, OBFUSCATE("_example__sym"), Kill, old_Kill);
+    //HOOK_NO_ORIG("libFileC.so", OBFUSCATE("0x123456"), FunctionExample);
+    //HOOK_NO_ORIG("libFileC.so", OBFUSCATE("_example__sym"), FunctionExample);
 
-    //PATCH(targetLibName, str2Offset("0x10709AC"), "E05F40B2 C0035FD6");
-    //HOOK(OBFUSCATE("libFileB.so"), str2Offset(OBFUSCATE("0x123456")), FunctionExample, old_FunctionExample);
-    //HOOK("libFileB.so", 4646464, FunctionExample, old_FunctionExample);
-    //HOOK_NO_ORIG("libFileC.so", str2Offset("0x123456"), FunctionExample);
-    //HOOKSYM("libFileB.so", "__SymbolNameExample", FunctionExample, old_FunctionExample);
-    //HOOKSYM_NO_ORIG("libFileB.so", "__SymbolNameExample", FunctionExample);
+    //PATCH(targetLibName, OBFUSCATE("0x10709AC"), "E05F40B2C0035FD6");
 
+    // you can use this for things as detect log, counting function calls, executing side code before the function is executed
+    // now instrument wrapper implemented for detecting execution
+    INST(targetLibName, OBFUSCATE("0x23558C"), OBFUSCATE("AnyNameForDetect"));
+    INST(targetLibName, OBFUSCATE("0x235630"), OBFUSCATE("AnyNameForDetect2"));
+    INST(targetLibName, OBFUSCATE("_example__sym"), OBFUSCATE("AnyNameForDetect3"));
+
+    // LOGI("Test SYM: 0x%llx", (uintptr_t)getAbsoluteAddress(targetLibName, "il2cpp_init"));
 #elif defined(__arm__)
     //Put your code here if you want the code to be compiled for armv7 only
 #endif
@@ -218,10 +241,6 @@ void hack_thread() {
 __attribute__((constructor))
 void lib_main() {
     // Create a new thread so it does not block the main thread, means the game would not freeze
-    // pthread_t ptid;
-    // pthread_create(&ptid, NULL, hack_thread, NULL);
-
     // In modern C++, you should use std::thread(yourFunction).detach() instead of pthread_create
-    // because it is cross-platform and more intuitive.
     std::thread(hack_thread).detach();
 }
