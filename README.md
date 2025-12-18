@@ -1,28 +1,26 @@
-# Fork Android-Mod-Menu by ABS
-This is just my vision of what version 5 should be like.
+**No official! This is just my vision of what version 5 should be like**
 
 # 5.0 what's new:
 ## C++:
 - Added xDL lib
 - KittyMemory lib updated
 - Macros.h & Utils.cpp:
-- - xDL sym resolver added
-- - HOOKs reworked with Dobby usage
-- - PATCH_SWITCH, RESTORE has been returned and reworked
-- - INST added (Dobby)
-- - asm support added (KittyMemory::Keystone assembler)
-- - Macro defines have been optimized
+- - _xDL sym resolver added_
+- - _HOOKs reworked with Dobby usage_
+- - _PATCH_SWITCH, RESTORE has been returned and reworked_
+- - _INST added (Dobby)_
+- - _asm support added (KittyMemory::Keystone assembler)_
+- - _Macro defines have been optimized_
 - Init() from Setup migrated to Menu for convenience
 - And64InlineHook and Substrate libs removed (replaced by Dobby)
 - get_device_api_level_inlines.h removed (replaced by JNI get_api_sdk)
 
 ## Java:
 - CrashHandler.java updated:
-- - more debug info
-- - save path has been changed to: android/media/PACKAGE/files/LOG_DIR for all devices
-- - clear old crash logs (keep last 5)
-- Main.java minor changes
-- Menu.java minor changes
+- - _more debug info_
+- - _save path has been changed to: android/media/PACKAGE/files/LOG_DIR for all devices_
+- - _clear old crash logs (keep last 5)_
+- Other minor changes
 
 ## Project settings:
 - Updated to SDK 36
