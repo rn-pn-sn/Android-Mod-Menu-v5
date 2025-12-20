@@ -56,6 +56,8 @@ void DobbyInstrumentWrapper(const char *lib, const char *relative, const char *n
 
 /// Dobby-Kitty patch implementation
 std::map<std::string, std::tuple<void*, std::vector<uint8_t>, size_t>> pExpress;
+// For some reason, the Dobby doesn't work correctly with destroy, making restore memory impossible...
+// Need time to fix the Dobby itself, so now using Kitty implementation.
 void DobbyPatchWrapper(const char *libName, const char *relative, std::string data, bool apply) {
     std::string key = relative;
     auto it = pExpress.find(key);
@@ -67,11 +69,11 @@ void DobbyPatchWrapper(const char *libName, const char *relative, std::string da
         abs = std::get<0>(it->second);
         patch_code = std::get<1>(it->second);
         patch_size = std::get<2>(it->second);
-        // LOGI(OBFUSCATE("%s <- expressed"), relative);
+         LOGI(OBFUSCATE("%s <- expressed"), relative);
     } else {
         abs = getAbsoluteAddress(libName, relative);
         pExpress[key] = std::make_tuple(abs, patch_code, patch_size);
-        // LOGI(OBFUSCATE("expressing %s -> new abs: 0x%llx"), relative, abs);
+         LOGI(OBFUSCATE("expressing %s -> new abs: 0x%llx"), relative, abs);
     }
 
     if(apply) {
@@ -81,7 +83,7 @@ void DobbyPatchWrapper(const char *libName, const char *relative, std::string da
                 patch_size = data.length() / 2;
                 patch_code.resize(patch_size);
                 KittyUtils::dataFromHex(data, patch_code.data());
-                // LOGI(OBFUSCATE("expressing %s -> new hex patch: %llx, %zu"), relative, patch_code.data(), patch_size);
+                 LOGI(OBFUSCATE("expressing %s -> new hex patch: %llx, %zu"), relative, patch_code.data(), patch_size);
             } else {
                 ks_engine *ks = nullptr;
                 ks_err err = (MP_ASM == 1) ? ks_open(KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN, &ks)
@@ -105,24 +107,23 @@ void DobbyPatchWrapper(const char *libName, const char *relative, std::string da
                 if (insn_bytes) ks_free(insn_bytes);
                 ks_close(ks);
 
-                // LOGI(OBFUSCATE("expressing %s -> new asm patch: %llx, %zu"), relative, patch_code.data(), patch_size);
+                 LOGI(OBFUSCATE("expressing %s -> new asm patch: %llx, %zu"), relative, patch_code.data(), patch_size);
             }
             pExpress[key] = std::make_tuple(abs, patch_code, patch_size);
         }
 
         if(!patch_code.empty()) {
             DobbyCodePatch(abs, patch_code.data(), patch_size);
-            // LOGI(OBFUSCATE("New patch created: %s"), relative);
+             LOGI(OBFUSCATE("New patch created: %s"), relative);
         } else {
             LOGE(OBFUSCATE("Failed to create patch: %s"), relative);
         }
     } else {
         DobbyDestroy(abs);
-        // LOGI(OBFUSCATE("Patch removed: %s"), relative);
+         LOGI(OBFUSCATE("Patch removed: %s"), relative);
     }
 }
 
-/* use this if for some reason Dobby doesn't suit you:
 /// KittyMemory patch implementation
 std::map<const char*, MemoryPatch> memoryPatches;
 void KittyPatchWrapper(const char *libName, const char *relative, std::string data, bool apply) {
@@ -169,14 +170,13 @@ void KittyPatchWrapper(const char *libName, const char *relative, std::string da
         }
     }
 }
-*/
 
 /// classic patch (offset || sym) (hex || asm)
-#define PATCH(lib, off_sym, hex_asm) DobbyPatchWrapper(lib, off_sym, hex_asm, true)
+#define PATCH(lib, off_sym, hex_asm) KittyPatchWrapper(lib, off_sym, hex_asm, true)
 /// patch original restore (offset || sym) (hex || asm)
-#define RESTORE(lib, off_sym) DobbyPatchWrapper(lib, off_sym, "", false)
+#define RESTORE(lib, off_sym) KittyPatchWrapper(lib, off_sym, "", false)
 
 /// patch switch (offset || sym) (hex || asm)
-#define PATCH_SWITCH(lib, off_sym, hex_asm, boolean) DobbyPatchWrapper(lib, off_sym, hex_asm, boolean)
+#define PATCH_SWITCH(lib, off_sym, hex_asm, boolean) KittyPatchWrapper(lib, off_sym, hex_asm, boolean)
 
 #endif //ANDROID_MOD_MENU_MACROS_H
