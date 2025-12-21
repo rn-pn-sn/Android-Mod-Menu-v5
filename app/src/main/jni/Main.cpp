@@ -121,11 +121,14 @@ void Changes(JNIEnv *env, jclass clazz, jobject obj, jint featNum, jstring featN
 
             // asm allows you to avoid using hex code, as it is generated automatically from the instructions.
             // - this is the awesome option if you know what you're doing
-            // - this is probably especially useful with creating dynamic deep patches
-
             // recommended insert ';' to separate statements, example: "mov x0, #1; ret"
             // recommended to test your instructions on https://armconverter.com or
             // https://shell-storm.org/online/Online-Assembler-and-Disassembler/
+
+            // - this is probably especially useful with creating dynamic deep patches
+            dPATCH_SWITCH(true, targetLibName, "0x1079728", "mov w%d, #%d", 0, 222);
+            dPATCH_SWITCH(true, targetLibName, "_example__sym", "mov w%d, #%d", 0, 222);
+            // standard formatting specifiers are supported (%d, %i, %x, %s, etc.)
 
 
             // Relative patches allow you to speed up patch creation if you are sure that the offsets within methods rarely change

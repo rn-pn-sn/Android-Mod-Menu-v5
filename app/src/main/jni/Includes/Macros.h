@@ -253,4 +253,16 @@ void PatchRelativeOffset(const char *libName, const char *rootOffset, const char
 /// relative patch switch (offset || sym) (offset) (hex || asm)
 #define rPATCH_SWITCH(lib, root_off_sym, add_off, hex_asm, boolean) PatchRelativeOffset(lib, OBFUSCATE(root_off_sym), OBFUSCATE(add_off), OBFUSCATE(hex_asm), boolean)
 
+
+
+/// Dynamic asm patches allow for real-time assembly of structures:
+
+/// dynamic asm patch (offset || sym) (asm pattern) (asm args)
+#define dPATCH(lib, off_sym, asms) DobbyPatchWrapper(lib, OBFUSCATE(off_sym), KittyUtils::String::Fmt(OBFUSCATE(asms), __VA_ARGS__), true)
+/// dynamic asm patch remove (offset || sym)
+#define dRESTORE(lib, off_sym) DobbyPatchWrapper(lib, OBFUSCATE(off_sym), "", false)
+/// dynamic asm patch (offset || sym) (asm pattern) (asm args)
+#define dPATCH_SWITCH(boolean, lib, off_sym, asms, ...) DobbyPatchWrapper(lib, OBFUSCATE(off_sym), KittyUtils::String::Fmt(OBFUSCATE(asms), __VA_ARGS__), boolean)
+/// dynamic asm relative patch (offset || sym) (offset) (asm pattern) (asm args)
+#define drPATCH_SWITCH(boolean, lib, root_off_sym, add_off, asms, ...) PatchRelativeOffset(lib, OBFUSCATE(root_off_sym), OBFUSCATE(add_off), KittyUtils::String::Fmt(OBFUSCATE(asms), __VA_ARGS__), boolean)
 #endif //ANDROID_MOD_MENU_MACROS_H
