@@ -61,9 +61,9 @@ void* getRelativeAddress(const char *libraryName, const char *rootOffset, const 
     uintptr_t offset2 = str2offset(addOffset);
 
     if(offset != 0) {
-        return (void*)(offset + offset2);
+        return getAbsAddress(libraryName, offset + offset2);
     } else {
-        return (void*)((uintptr_t) getSymAddress(libraryName, rootOffset, true));
+        return getSymAddress(libraryName, rootOffset, true);
     }
 }
 
